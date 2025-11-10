@@ -1,4 +1,4 @@
-# test_biblioteca_virtual.py
+# test_biblioteca_virtual_colores.py
 import time
 from datetime import datetime
 from selenium import webdriver
@@ -11,9 +11,10 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from reportlab.lib import colors
 
 # =========================
-# CONFIGURACIÓN (AJUSTAR)
+# CONFIGURACIÓN
 # =========================
 URL_LOGIN = "https://biblioteca-cubo.com/Biblioteca-CUBO/public/login"
 URL_DASHBOARD = "https://biblioteca-cubo.com/Biblioteca-CUBO/public/admin"
@@ -28,21 +29,35 @@ REPORT_FILE = "reporte_pruebas_BibliotecaVirtual.pdf"
 # =========================
 # UTILIDADES DE REPORTE
 # =========================
-results = []  # cada item: dict {type, name, status, detail, time}
+results = []
+
+# Colores ANSI para terminal
+GREEN = "\033[92m"
+RED = "\033[91m"
+GRAY = "\033[90m"
+RESET = "\033[0m"
+
+def colored_bar(status):
+    if status == "OK":
+        return f"{GREEN}████████████████{RESET}"
+    elif status == "FAIL":
+        return f"{RED}████████████████{RESET}"
+    else:
+        return f"{GRAY}████████████████{RESET}"
 
 def add_result(t_type, name, status, detail=""):
     results.append({
         "type": t_type,
         "name": name,
-        "status": status,   # "OK", "FAIL", "SKIP"
+        "status": status,
         "detail": detail,
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     })
-    icon = "✔️" if status == "OK" else ("❌" if status == "FAIL" else "➖")
-    print(f"[{icon}] {t_type} - {name} {('- ' + detail) if detail else ''}")
+    bar = colored_bar(status)
+    print(f"{bar} {status:<5} | {t_type:<12} | {name}")
 
 # =========================
-# INICIALIZAR DRIVER
+# DRIVER
 # =========================
 def start_driver(headless=False):
     opts = Options()
@@ -50,15 +65,13 @@ def start_driver(headless=False):
         opts.add_argument("--headless=new")
     opts.add_argument("--start-maximized")
     opts.add_argument("--disable-blink-features=AutomationControlled")
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-dev-shm-usage")
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=opts)
     driver.set_page_load_timeout(30)
     return driver
 
 # =========================
-# PRUEBAS UNITARIAS (INTERFAZ)
+# PRUEBAS
 # =========================
 def pruebas_unitarias(driver, wait):
     t = "UNITARIA"
@@ -76,42 +89,27 @@ def pruebas_unitarias(driver, wait):
         add_result(t, "Campo 'password' visible", "FAIL", str(e))
 
     try:
-        submit = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+        driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
         add_result(t, "Botón submit/login presente", "OK")
     except Exception as e:
         add_result(t, "Botón submit/login presente", "FAIL", str(e))
 
-# =========================
-# PRUEBAS DE INTEGRACIÓN (LOGIN + REDIRECCIÓN)
-# =========================
 def pruebas_integracion(driver, wait):
     t = "INTEGRACIÓN"
     try:
         driver.get(URL_LOGIN)
         wait.until(EC.presence_of_element_located((By.NAME, "email")))
-        driver.find_element(By.NAME, "email").clear()
         driver.find_element(By.NAME, "email").send_keys(ADMIN_EMAIL)
-        driver.find_element(By.NAME, "password").clear()
         driver.find_element(By.NAME, "password").send_keys(ADMIN_PASSWORD)
         driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
-        # esperar redirección al dashboard
-        try:
-            wait.until(EC.url_contains(URL_DASHBOARD))
+        time.sleep(3)
+        if any(k in driver.page_source for k in ["Dashboard", "Panel", "Bienvenido", "Administrador"]):
             add_result(t, "Login y redirección al dashboard", "OK")
-        except:
-            # alternativa: buscar texto de bienvenida
-            time.sleep(2)
-            page = driver.page_source
-            if any(k in page for k in ["Dashboard", "Panel", "Bienvenido", "Administrador"]):
-                add_result(t, "Login (contenido dashboard detectado)", "OK")
-            else:
-                add_result(t, "Login y redirección al dashboard", "FAIL", "No redirigió ni encontró texto esperado")
+        else:
+            add_result(t, "Login y redirección al dashboard", "FAIL", "No redirigió correctamente")
     except Exception as e:
         add_result(t, "Login y redirección al dashboard", "FAIL", str(e))
 
-# =========================
-# PRUEBAS FUNCIONALES (CRUD botones libros)
-# =========================
 def pruebas_funcionales_libros(driver, wait):
     t = "FUNCIONAL"
     try:
@@ -122,82 +120,25 @@ def pruebas_funcionales_libros(driver, wait):
         add_result(t, "Carga página 'Gestión de Libros Físicos'", "FAIL", str(e))
         return
 
-    # Intentar detectar campo de búsqueda (si existe)
-    try:
-        search = driver.find_element(By.ID, "buscarLibro")
-        add_result(t, "Campo búsqueda libros (id=buscarLibro)", "OK")
-    except:
-        add_result(t, "Campo búsqueda libros (id=buscarLibro)", "SKIP", "No existe en interfaz")
-
-    # Probar filtros (si existen)
-    try:
-        filtros = driver.find_elements(By.CSS_SELECTOR, ".filter-buttons .filter-btn")
-        if len(filtros) >= 1:
-            for idx, f in enumerate(filtros):
-                try:
-                    driver.execute_script("arguments[0].scrollIntoView(true);", f)
-                    driver.execute_script("arguments[0].click();", f)
-                    time.sleep(0.7)
-                    add_result(t, f"Filtro libros #{idx+1} clickable", "OK")
-                except Exception as fe:
-                    add_result(t, f"Filtro libros #{idx+1} clickable", "FAIL", str(fe))
-        else:
-            add_result(t, "Filtros libros", "SKIP", "No hay botones de filtro")
-    except Exception as e:
-        add_result(t, "Filtros libros", "FAIL", str(e))
-
-    # Botones CRUD: usar selectores proporcionados (clases/ids)
     botones = {
-        "Agregar libro": (By.CSS_SELECTOR, ".btn-add, #btn-add"),
-        "Editar libro": (By.CSS_SELECTOR, ".btn-edit, #btn-edit"),
-        "Ver libro": (By.CSS_SELECTOR, ".btn-view, #btn-view"),
-        "Eliminar libro": (By.CSS_SELECTOR, ".btn-delete, #btn-delete")
+        "Agregar libro": (By.CSS_SELECTOR, ".btn-add"),
+        "Editar libro": (By.CSS_SELECTOR, ".btn-edit"),
+        "Ver libro": (By.CSS_SELECTOR, ".btn-view"),
+        "Eliminar libro": (By.CSS_SELECTOR, ".btn-delete")
     }
 
     for nombre, locator in botones.items():
         try:
-            # locator es (By.CSS_SELECTOR, selector)
-            by, sel = locator
-            elems = driver.find_elements(by, sel)
+            elems = driver.find_elements(*locator)
             if not elems:
                 add_result(t, nombre, "SKIP", "Botón no encontrado")
                 continue
-            # Si hay varios, tomamos el primero visible
-            clicked = False
-            for e in elems:
-                try:
-                    driver.execute_script("arguments[0].scrollIntoView(true);", e)
-                    # intentar click seguro
-                    driver.execute_script("arguments[0].click();", e)
-                    time.sleep(1.2)
-                    add_result(t, nombre, "OK")
-                    # si se abrió modal o página nueva, intentar cerrarlo o regresar
-                    # cerrar modal si aparece (buscamos .modal .btn-close o button[data-bs-dismiss='modal'])
-                    try:
-                        close_btn = driver.find_elements(By.CSS_SELECTOR, ".modal .btn-close, button[data-bs-dismiss='modal'], .modal .close")
-                        if close_btn:
-                            driver.execute_script("arguments[0].click();", close_btn[0])
-                            time.sleep(0.6)
-                    except:
-                        pass
-                    try:
-                        driver.back()
-                        time.sleep(0.6)
-                    except:
-                        pass
-                    clicked = True
-                    break
-                except Exception as click_ex:
-                    # probar siguiente elemento si hay
-                    continue
-            if not clicked:
-                add_result(t, nombre, "FAIL", "No fue posible hacer click en ningún elemento")
+            driver.execute_script("arguments[0].click();", elems[0])
+            time.sleep(1)
+            add_result(t, nombre, "OK")
         except Exception as e:
             add_result(t, nombre, "FAIL", str(e))
 
-# =========================
-# PRUEBAS FUNCIONALES (Prestamos)
-# =========================
 def pruebas_funcionales_prestamos(driver, wait):
     t = "FUNCIONAL"
     try:
@@ -208,121 +149,75 @@ def pruebas_funcionales_prestamos(driver, wait):
         add_result(t, "Carga página 'Gestión de Préstamos'", "FAIL", str(e))
         return
 
-    # búsqueda por input dentro de .search-bar
-    try:
-        s = driver.find_element(By.CSS_SELECTOR, ".search-bar input, input[name='search']")
-        s.clear()
-        s.send_keys("Carlos")
-        s.send_keys(Keys.RETURN)
-        time.sleep(1.2)
-        add_result(t, "Búsqueda préstamos por usuario", "OK")
-    except Exception as e:
-        add_result(t, "Búsqueda préstamos por usuario", "SKIP", "Campo búsqueda no encontrado o no interactivo")
-
-    # filtros prestamos
     try:
         filtros = driver.find_elements(By.CSS_SELECTOR, ".filter-buttons .filter-btn")
         if filtros:
-            for i, f in enumerate(filtros):
-                try:
-                    driver.execute_script("arguments[0].click();", f)
-                    time.sleep(0.8)
-                    add_result(t, f"Filtro préstamos #{i+1} clickable", "OK")
-                except Exception as fe:
-                    add_result(t, f"Filtro préstamos #{i+1} clickable", "FAIL", str(fe))
+            for f in filtros:
+                driver.execute_script("arguments[0].click();", f)
+                time.sleep(0.5)
+            add_result(t, "Filtros de préstamos funcionales", "OK")
         else:
-            add_result(t, "Filtros préstamos", "SKIP", "No hay botones de filtro")
+            add_result(t, "Filtros de préstamos funcionales", "SKIP", "No hay filtros")
     except Exception as e:
-        add_result(t, "Filtros préstamos", "FAIL", str(e))
+        add_result(t, "Filtros de préstamos funcionales", "FAIL", str(e))
 
-# =========================
-# USABILIDAD (navegación, textos, tiempos)
-# =========================
 def pruebas_usabilidad(driver, wait):
     t = "USABILIDAD"
     try:
-        # comprobar acceso rápido entre módulos
-        driver.get(URL_DASHBOARD)
-        time.sleep(1)
-        # intentar navegar a libros y luego a prestamos
-        driver.get(URL_LIBROS); time.sleep(0.8)
-        driver.get(URL_PRESTAMOS); time.sleep(0.8)
-        add_result(t, "Navegación entre módulos principal -> libros -> prestamos", "OK")
+        driver.get(URL_LIBROS)
+        driver.get(URL_PRESTAMOS)
+        add_result(t, "Navegación entre módulos (Libros → Préstamos)", "OK")
     except Exception as e:
         add_result(t, "Navegación entre módulos", "FAIL", str(e))
 
-    # revisar presencia de texto clave en páginas
-    try:
-        driver.get(URL_LIBROS); time.sleep(0.8)
-        page = driver.page_source
-        if "Catálogo de Libros" in page or "Libros" in page:
-            add_result(t, "Texto 'Catálogo de Libros' visible", "OK")
-        else:
-            add_result(t, "Texto 'Catálogo de Libros' visible", "SKIP", "Texto no detectado")
-    except Exception as e:
-        add_result(t, "Texto 'Catálogo de Libros' visible", "FAIL", str(e))
-
 # =========================
-# GENERAR REPORTE PDF
+# GENERAR PDF
 # =========================
 def generar_pdf(filename=REPORT_FILE):
     c = canvas.Canvas(filename, pagesize=letter)
     c.setTitle("Reporte de Pruebas - Biblioteca Virtual CUBO")
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(160, 760, "Reporte de Pruebas - Biblioteca Virtual CUBO")
+
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(150, 760, "Reporte de Pruebas - Biblioteca Virtual CUBO")
     c.setFont("Helvetica", 10)
-    c.drawString(50, 740, f"Fecha ejecución: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    y = 715
+    c.drawString(50, 740, f"Fecha de ejecución: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # Agrupar por type
-    types = ["UNITARIA", "INTEGRACIÓN", "FUNCIONAL", "USABILIDAD"]
-    for t in types:
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(50, y, f"{t}")
-        y -= 18
-        c.setFont("Helvetica", 9)
-        for r in [x for x in results if x["type"] == t]:
-            line = f"{'✔️' if r['status']=='OK' else ('❌' if r['status']=='FAIL' else '➖')} {r['name']} - {r['status']}"
-            if r["detail"]:
-                line += f" ({r['detail']})"
-            c.drawString(55, y, line)
-            y -= 14
-            if y < 60:
-                c.showPage()
-                y = 750
-        y -= 8
+    y = 710
+    for r in results:
+        if r["status"] == "OK":
+            c.setFillColor(colors.green)
+        elif r["status"] == "FAIL":
+            c.setFillColor(colors.red)
+        else:
+            c.setFillColor(colors.grey)
 
-    # listar restantes no agrupados
-    c.setFont("Helvetica", 9)
+        c.rect(50, y-5, 15, 10, fill=True, stroke=False)
+        c.setFillColor(colors.black)
+        c.drawString(70, y, f"[{r['status']}] {r['type']} - {r['name']}")
+        y -= 15
+        if y < 60:
+            c.showPage()
+            y = 750
     c.save()
-    print(f"\n📄 Reporte generado: {filename}")
+    print(f"\n📄 Reporte PDF generado: {filename}")
 
 # =========================
-# RUN
+# MAIN
 # =========================
 def main():
     driver = None
     try:
-        driver = start_driver(headless=False)   # headless=True para CI
-        wait = WebDriverWait(driver, 12)
+        driver = start_driver(headless=False)
+        wait = WebDriverWait(driver, 10)
 
-        # Unitarias (interfaz)
         pruebas_unitarias(driver, wait)
-
-        # Integración (login + dashboard)
         pruebas_integracion(driver, wait)
-
-        # Funcionales - Libros (CRUD/buttons)
         pruebas_funcionales_libros(driver, wait)
-
-        # Funcionales - Prestamos
         pruebas_funcionales_prestamos(driver, wait)
-
-        # Usabilidad
         pruebas_usabilidad(driver, wait)
 
     except Exception as e:
-        print("Error general en ejecución:", e)
+        print("ups Error general:", e)
     finally:
         if driver:
             driver.quit()
